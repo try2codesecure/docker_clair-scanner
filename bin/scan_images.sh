@@ -1,18 +1,39 @@
-#!/bin/sh
+#!/bin/bash
 
-mkdir -p /tmp/report/
+dir=/tmp/report/"$(date +%Y%m%d%H%M%S)"
+mkdir -p "$dir"
 clair_ip=$(/sbin/ifconfig eth0 | grep 'inet addr:' | cut -d: -f2| cut -d' ' -f1)
 
 for image in "$@"
 do
-    clair-scanner -c=http://clair:6060 -t=$THRESHOLD --reportAll=false --ip=$clair_ip -r /tmp/report/$(echo $image|md5sum |cut -d' ' -f1).json $image > /tmp/report/$(echo $image|md5sum |cut -d' ' -f1).log 2>&1
+    [[ "$image" =~ "clair-" ]] && continue
+    [[ "$image" =~ ":" ]] || image="$image":latest
+    LOG="$dir/$(echo "$image"| tr ":/" "_" |cut -d' ' -f1)"
+    if [ "$VERBOSE" == 1 ]; then
+        echo "Image = $image"
+        clair-scanner --clair=http://clair:6060 --threshold="$THRESHOLD" --reportAll=false --ip="$clair_ip" --report="$LOG".json "$image" | tee "$LOG".log
+    else
+        clair-scanner --clair=http://clair:6060 --threshold="$THRESHOLD" --reportAll=false --ip="$clair_ip" --report="$LOG".json "$image" 1>/dev/null 2>&1
+    fi
 done
 
-if [ -n "$(ls -A /tmp/report)" ]
-then
-    #jq -sM . /tmp/report/*.json | jq '[.[] | select (.vulnerabilities != []) | {image: .image, vulnerabilities: .vulnerabilities}]'|grep -v '^\[\]$' && exit 1 || exit 0
-    find /tmp/report/*.json -type f -mmin -20 -exec cat {} \; | jq -sM '.' | jq '[.[] | select (.unapproved != []) | {image: .image, unapproved: .unapproved}]'|grep -v '^\[\]$' && exit 1 || exit 0
+if [ -n "$(find "$dir" -name "*.json")" ]; then
+    if [ "$VERBOSE" == 1 ]; then
+        if jq -sM '.' "$dir"/*.json | jq '[.[] | select (.unapproved != []) | {image: .image, unapproved: .unapproved}]'|grep -v '^\[\]$'; then
+            exit 1
+        else
+            rm -Rf "$dir"
+            exit 0
+        fi 
+    else
+        if jq -sM '.' "$dir"/*.json | jq '[.[] | select (.unapproved != []) | {image: .image, unapproved: .unapproved}]'|grep -v '^\[\]$' 1>/dev/null 2>&1; then
+            exit 1
+        else
+            rm -Rf "$dir"
+            exit 0
+        fi 
+    fi
 else
-    echo "No image scanned."
+    [[ "$VERBOSE" == 1 ]] && echo "No image scanned."
     exit 1
 fi
