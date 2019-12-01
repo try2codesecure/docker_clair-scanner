@@ -2,14 +2,22 @@ version: '2.1'
 
 services:
     db:
+        container_name: clair-db
         image: arminc/clair-db:latest
         restart: on-failure
         healthcheck:
             test: nc -z db 5432
-            interval: 1s
+            interval: 5s
             retries: 20
+        cpu_shares: 256
+        mem_limit: 2048M
+        security_opt:
+          - no-new-privileges
+        pids_limit: 200
+
     clair:
-        image: arminc/clair-local-scan:v2.0.5
+        container_name: clair-local
+        image: arminc/clair-local-scan:latest
         links:
         - db:postgres
         depends_on:
@@ -18,14 +26,29 @@ services:
         restart: on-failure
         healthcheck:
             test: nc -z clair 6060 && nc -z clair 6061
-            interval: 1s
+            interval: 2s
             retries: 20
+        cpu_shares: 256
+        mem_limit: 2048M
+        security_opt:
+          - no-new-privileges
+        pids_limit: 200
+
     scanner:
-        image: quay.io/usr42/clair-container-scan:latest
+        container_name: clair-scanner
+        #image: usr42/clair-container-scan:latest
+        build:
+          context: ./
         links:
         - clair
         volumes:
         - /var/run/docker.sock:/var/run/docker.sock:ro
+        - $PWD/clair-report:/tmp/report
         depends_on:
             clair:
                 condition: service_healthy
+        cpu_shares: 256
+        mem_limit: 2048M
+        security_opt:
+          - no-new-privileges
+        pids_limit: 200
